@@ -55,6 +55,8 @@ pub mod serial;
 #[cfg(feature = "device-selected")]
 pub mod spi;
 #[cfg(feature = "device-selected")]
+pub mod dma;
+#[cfg(feature = "device-selected")]
 pub mod spi_bitbang;
 #[cfg(feature = "device-selected")]
 pub mod time;

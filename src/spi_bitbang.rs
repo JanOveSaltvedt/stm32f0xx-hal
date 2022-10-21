@@ -2,10 +2,14 @@
 //! Only the MOSI pin is used, the other pins can be used for other purposes
 //! 
 
-use core::marker::PhantomData;
 use core::{ops::Deref, ptr};
 
 pub use embedded_hal::spi::{Mode, Phase, Polarity};
+
+use crate::dma::{dma1, self};
+use crate::dma::{Receive, RxDma, RxTxDma, Transfer, TransferPayload, Transmit, TxDma, R, W};
+use embedded_dma::{ReadBuffer, WriteBuffer};
+use core::sync::atomic::{self, Ordering};
 
 use crate::pac::SPI1;
 
@@ -243,3 +247,97 @@ where
     }
 }
 
+// DMA
+
+// spi_dma!(
+//     pac::SPI1,
+//     dma1::C2,
+//     dma1::C3,
+//     Spi1RxDma,
+//     Spi1TxDma,
+//     Spi1RxTxDma
+// );
+//
+// macro_rules! spi_dma {
+// ($SPIi:ty, $RCi:ty, $TCi:ty, $rxdma:ident, $txdma:ident, $rxtxdma:ident) => {
+
+pub type SpiTxDma<SPI, MOSIPIN, CHANNEL> = TxDma<Spi<SPI, MOSIPIN>, CHANNEL>;
+
+pub type Spi1TxDma<MOSIPIN> = SpiTxDma<SPI1, MOSIPIN, dma1::C3>;
+
+impl<MOSIPIN> Transmit for SpiTxDma<SPI1, MOSIPIN, dma1::C3> {
+    type TxChannel = dma1::C3;
+    type ReceivedWord = u8;
+}
+
+
+impl<MOSIPIN> Spi<SPI1, MOSIPIN> {
+    pub fn with_tx_dma(self, channel: dma1::C3) -> SpiTxDma<SPI1, MOSIPIN, dma1::C3> {
+        self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
+        SpiTxDma {
+            payload: self,
+            channel,
+        }
+    }
+}
+
+impl<MOSIPIN> SpiTxDma<SPI1, MOSIPIN, dma1::C3> {
+    pub fn release(self) -> (Spi<SPI1, MOSIPIN>, dma1::C3) {
+        let SpiTxDma { payload, channel } = self;
+        payload.spi.cr2.modify(|_, w| w.txdmaen().clear_bit());
+        (payload, channel)
+    }
+}
+
+impl<MOSIPIN> TransferPayload for SpiTxDma<SPI1, MOSIPIN, dma1::C3> {
+    fn start(&mut self) {
+        self.channel.start();
+    }
+    fn stop(&mut self) {
+        self.channel.stop();
+    }
+}
+
+impl<B, MOSIPIN> crate::dma::WriteDma<B, u8>
+    for SpiTxDma<SPI1,MOSIPIN, dma1::C3>
+where
+    B: ReadBuffer<Word = u8>,
+{
+    fn write(mut self, buffer: B) -> Transfer<R, B, Self> {
+        // NOTE(unsafe) We own the buffer now and we won't call other `&mut` on it
+        // until the end of the transfer.
+        let (ptr, len) = unsafe { buffer.read_buffer() };
+        self.channel.set_peripheral_address(
+            unsafe { &(*<SPI1>::ptr()).dr as *const _ as u32 },
+            false,
+        );
+        self.channel.set_memory_address(ptr as u32, true);
+        self.channel.set_transfer_length(len);
+
+        atomic::compiler_fence(Ordering::Release);
+        self.channel.ch().cr.modify(|_, w| {
+            w
+                // memory to memory mode disabled
+                .mem2mem()
+                .clear_bit()
+                // medium channel priority level
+                .pl()
+                .medium()
+                // 8-bit memory size
+                .msize()
+                .bits8()
+                // 8-bit peripheral size
+                .psize()
+                .bits8()
+                // circular mode disabled
+                .circ()
+                .clear_bit()
+                // read from memory
+                .dir()
+                .set_bit()
+        });
+        self.start();
+
+        Transfer::r(buffer, self)
+    }
+}

@@ -14,3 +14,9 @@ pub use embedded_hal::digital::v2::ToggleableOutputPin as _embedded_hal_gpio_Tog
 pub use crate::gpio::GpioExt as _stm32f0xx_hal_gpio_GpioExt;
 pub use crate::rcc::RccExt as _stm32f0xx_hal_rcc_RccExt;
 pub use crate::time::U32Ext as _stm32f0xx_hal_time_U32Ext;
+
+pub use crate::dma::CircReadDma as _stm32f0x_hal_dma_CircReadDma;
+pub use crate::dma::DmaExt as _stm32f0x_hal_dma_DmaExt;
+pub use crate::dma::ReadDma as _stm32f0x_dma_ReadDma;
+pub use crate::dma::ReadWriteDma as _stm32f0x_dma_ReadWriteDma;
+pub use crate::dma::WriteDma as _stm32f0x_dma_WriteDma;
